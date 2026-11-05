@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Student Management System</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23C4122F'/%3E%3Cpath d='m16 7 12 6-12 6-12-6 12-6Zm-7 9v5c4 3 10 3 14 0v-5l-7 3.5L9 16Z' fill='%23fff'/%3E%3C/svg%3E">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</head>
+<body data-role="{{ user.role }}" data-user="{{ user.username }}" data-csrf="{{ csrf }}">
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11v5c3.6 2.7 8.4 2.7 12 0v-5M22 9v6"/></svg>
+        </span>
+        <span class="brand-text">
+          <strong>Student Management</strong>
+          <span>Records dashboard</span>
+        </span>
+      </div>
+      <div class="topbar-actions">
+        <div class="user-menu">
+          <button class="user-btn" id="user-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="user-pop">
+            <span class="avatar avatar-sm" aria-hidden="true">{{ user.username[:1]|upper }}</span>
+            <span class="user-meta">
+              <strong>{{ user.username }}</strong>
+              <span class="role-chip role-{{ user.role }}">{{ user.role }}</span>
+            </span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="user-pop" id="user-pop" hidden>
+            <button type="button" class="menu-item" id="menu-password">Change password</button>
+            {% if user.role == 'admin' %}
+            <button type="button" class="menu-item" id="menu-users">Manage users</button>
+            <button type="button" class="menu-item" id="menu-audit">Activity log</button>
+            {% endif %}
+            <button type="button" class="menu-item menu-danger" id="menu-logout">Sign out</button>
+          </div>
+        </div>
+        <button class="icon-btn theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="shell">
+
+    <section class="banner">
+      <div class="banner-copy">
+        <p class="eyebrow">OVERVIEW</p>
+        <h1>Student records</h1>
+        <p>Add, update and review every student in one place.</p>
+      </div>
+      <div class="banner-actions">
+        <button class="btn btn-outline-light" id="export-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+          Export CSV
+        </button>
+        <button class="btn btn-light" id="add-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Add student
+        </button>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Summary">
+      <article class="stat">
+        <div class="stat-top">
+          <span class="stat-label">Total students</span>
+          <span class="stat-icon stat-icon-students" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        </div>
+        <strong class="stat-value" id="stat-total">0</strong>
+        <span class="stat-sub" id="stat-courses">across 0 courses</span>
+      </article>
+      <article class="stat">
+        <div class="stat-top">
+          <span class="stat-label">Active</span>
+          <span class="stat-icon stat-icon-active" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg></span>
+        </div>
+        <strong class="stat-value" id="stat-active">0</strong>
+        <span class="stat-sub" id="stat-suspended">0 suspended</span>
+      </article>
+      <article class="stat">
+        <div class="stat-top">
+          <span class="stat-label">Graduated</span>
+          <span class="stat-icon stat-icon-graduated" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11v5c3.6 2.7 8.4 2.7 12 0v-5M22 9v6"/></svg></span>
+        </div>
+        <strong class="stat-value" id="stat-graduated">0</strong>
+        <span class="stat-sub" id="stat-grad-share">0% of all students</span>
+      </article>
+      <article class="stat">
+        <div class="stat-top">
+          <span class="stat-label">Average grade</span>
+          <span class="stat-icon stat-icon-average" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m18 9-5 5-4-4-4 4"/></svg></span>
+        </div>
+        <strong class="stat-value"><span id="stat-average">–</span><small> / 20</small></strong>
+        <span class="stat-sub">across graded students</span>
+      </article>
+    </section>
+
+    <section class="panel" aria-labelledby="by-course-title">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h17"/><path d="M8 15v-4M13 15V7M18 15V9"/></svg></span>
+          <h2 id="by-course-title">Students by course</h2>
+        </div>
+        <p class="muted small" id="by-course-note"></p>
+      </div>
+      <ul class="bars" id="by-course"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="list-title">
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg></span>
+          <h2 id="list-title" tabindex="-1">All students</h2>
+        </div>
+        <p class="muted" id="result-summary" aria-live="polite"></p>
+      </div>
+
+      <form class="toolbar" id="filters" role="search" autocomplete="off">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+          <label class="sr-only" for="search">Search students</label>
+          <input id="search" type="search" placeholder="Search by name, email, ID or course" maxlength="100">
+        </div>
+        <div class="select">
+          <label class="sr-only" for="filter-course">Course</label>
+          <select id="filter-course"><option value="">All courses</option></select>
+        </div>
+        <div class="select">
+          <label class="sr-only" for="filter-status">Status</label>
+          <select id="filter-status">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="graduated">Graduated</option>
+            <option value="suspended">Suspended</option>
+          </select>
+        </div>
+        <div class="select">
+          <label class="sr-only" for="filter-sort">Sort by</label>
+          <select id="filter-sort">
+            <option value="-created">Newest first</option>
+            <option value="created">Oldest first</option>
+            <option value="name">Name A to Z</option>
+            <option value="-name">Name Z to A</option>
+            <option value="-average">Average, high to low</option>
+            <option value="average">Average, low to high</option>
+            <option value="year">Year, low to high</option>
+            <option value="-year">Year, high to low</option>
+            <option value="course">Course A to Z</option>
+          </select>
+        </div>
+        <button class="btn btn-ghost" id="clear-filters" type="button" hidden>Clear filters</button>
+      </form>
+
+      <div id="list-region" aria-busy="false">
+        <div class="table-wrap" id="table-wrap">
+          <table class="table" role="table">
+            <caption class="sr-only">Students</caption>
+            <thead>
+              <tr role="row">
+                <th role="columnheader" scope="col">Student</th>
+                <th role="columnheader" scope="col">ID</th>
+                <th role="columnheader" scope="col">Course</th>
+                <th role="columnheader" scope="col">Average</th>
+                <th role="columnheader" scope="col">Status</th>
+                <th role="columnheader" scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+
+        <div class="empty" id="empty" hidden>
+          <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
+          <h3 id="empty-title">No students yet</h3>
+          <p class="muted" id="empty-text">Add your first student to get started.</p>
+          <button class="btn btn-primary" id="empty-action" type="button">Add student</button>
+        </div>
+
+        <p class="alert list-error" id="list-error" role="alert" hidden></p>
+
+        <nav class="pagination" id="pagination" aria-label="Pagination" hidden></nav>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Add / edit -->
+  <dialog id="form-dialog" aria-labelledby="form-title">
+    <form id="student-form" class="dialog-inner" novalidate>
+      <header class="dialog-head">
+        <h2 id="form-title">Add student</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <p class="alert" id="form-alert" role="alert" hidden></p>
+        <p class="muted small">Fields marked with * are required.</p>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="f-first_name">First name *</label>
+            <input id="f-first_name" name="first_name" type="text" autocomplete="off" maxlength="60" required aria-describedby="e-first_name">
+            <p class="field-error" id="e-first_name"></p>
+          </div>
+          <div class="field">
+            <label for="f-last_name">Last name *</label>
+            <input id="f-last_name" name="last_name" type="text" autocomplete="off" maxlength="60" required aria-describedby="e-last_name">
+            <p class="field-error" id="e-last_name"></p>
+          </div>
+          <div class="field">
+            <label for="f-email">Email *</label>
+            <input id="f-email" name="email" type="email" autocomplete="off" maxlength="254" required aria-describedby="e-email">
+            <p class="field-error" id="e-email"></p>
+          </div>
+          <div class="field">
+            <label for="f-phone">Phone</label>
+            <input id="f-phone" name="phone" type="tel" autocomplete="off" maxlength="20" aria-describedby="e-phone">
+            <p class="field-error" id="e-phone"></p>
+          </div>
+          <div class="field">
+            <label for="f-student_id">Student ID</label>
+            <input id="f-student_id" name="student_id" type="text" autocomplete="off" maxlength="20" aria-describedby="h-student_id e-student_id">
+            <p class="hint" id="h-student_id">Leave blank to generate one automatically.</p>
+            <p class="field-error" id="e-student_id"></p>
+          </div>
+          <div class="field">
+            <label for="f-date_of_birth">Date of birth</label>
+            <input id="f-date_of_birth" name="date_of_birth" type="date" min="1900-01-01" aria-describedby="e-date_of_birth">
+            <p class="field-error" id="e-date_of_birth"></p>
+          </div>
+          <div class="field">
+            <label for="f-gender">Gender</label>
+            <select id="f-gender" name="gender" aria-describedby="e-gender">
+              <option value="">Not specified</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="other">Other</option>
+            </select>
+            <p class="field-error" id="e-gender"></p>
+          </div>
+          <div class="field">
+            <label for="f-course">Course *</label>
+            <input id="f-course" name="course" type="text" list="course-list" autocomplete="off" maxlength="80" required aria-describedby="e-course">
+            <datalist id="course-list"></datalist>
+            <p class="field-error" id="e-course"></p>
+          </div>
+          <div class="field">
+            <label for="f-year">Year</label>
+            <select id="f-year" name="year" aria-describedby="e-year">
+              <option value="1">Year 1</option>
+              <option value="2">Year 2</option>
+              <option value="3">Year 3</option>
+              <option value="4">Year 4</option>
+              <option value="5">Year 5</option>
+              <option value="6">Year 6</option>
+            </select>
+            <p class="field-error" id="e-year"></p>
+          </div>
+          <div class="field">
+            <label for="f-average">Average (0 to 20)</label>
+            <input id="f-average" name="average" type="number" min="0" max="20" step="0.01" inputmode="decimal" aria-describedby="e-average">
+            <p class="field-error" id="e-average"></p>
+          </div>
+          <div class="field">
+            <label for="f-status">Status</label>
+            <select id="f-status" name="status" aria-describedby="e-status">
+              <option value="active">Active</option>
+              <option value="graduated">Graduated</option>
+              <option value="suspended">Suspended</option>
+            </select>
+            <p class="field-error" id="e-status"></p>
+          </div>
+          <div class="field field-wide">
+            <label for="f-address">Address</label>
+            <input id="f-address" name="address" type="text" autocomplete="off" maxlength="200" aria-describedby="e-address">
+            <p class="field-error" id="e-address"></p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="form-submit">Save student</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Details -->
+  <dialog id="details-dialog" aria-labelledby="details-name">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <div class="person">
+          <span class="avatar avatar-lg" id="details-avatar" aria-hidden="true"></span>
+          <div>
+            <h2 id="details-name"></h2>
+            <p class="muted small" id="details-id"></p>
+          </div>
+        </div>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <dl class="details" id="details-list"></dl>
+      </div>
+      <footer class="dialog-foot dialog-foot-split">
+        <button type="button" class="btn btn-danger-outline" id="details-delete">Delete</button>
+        <div class="foot-actions">
+          <button type="button" class="btn btn-ghost" data-close>Close</button>
+          <button type="button" class="btn btn-primary" id="details-edit">Edit</button>
+        </div>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Confirmation (delete student / user, disable user) -->
+  <dialog id="confirm-dialog" class="dialog-small" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+    <div class="dialog-inner">
+      <div class="dialog-body confirm-body">
+        <span class="confirm-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </span>
+        <h2 id="confirm-title">Delete student?</h2>
+        <p class="muted" id="confirm-text"></p>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok">Delete student</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Change own password -->
+  <dialog id="password-dialog" class="dialog-small" aria-labelledby="password-title">
+    <form id="password-form" class="dialog-inner" novalidate>
+      <header class="dialog-head">
+        <h2 id="password-title">Change password</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <p class="alert" id="password-alert" role="alert" hidden></p>
+        <div class="field">
+          <label for="pw-current">Current password</label>
+          <input id="pw-current" type="password" autocomplete="current-password" maxlength="128" required aria-describedby="e-pw-current">
+          <p class="field-error" id="e-pw-current"></p>
+        </div>
+        <div class="field">
+          <label for="pw-new">New password</label>
+          <input id="pw-new" type="password" autocomplete="new-password" maxlength="128" required aria-describedby="h-pw-new e-pw-new">
+          <p class="hint" id="h-pw-new">At least 8 characters, with a letter and a number.</p>
+          <p class="field-error" id="e-pw-new"></p>
+        </div>
+        <div class="field">
+          <label for="pw-repeat">Repeat new password</label>
+          <input id="pw-repeat" type="password" autocomplete="new-password" maxlength="128" required aria-describedby="e-pw-repeat">
+          <p class="field-error" id="e-pw-repeat"></p>
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="password-submit">Change password</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Manage users (admin) -->
+  <dialog id="users-dialog" class="dialog-wide" aria-labelledby="users-title">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="users-title">Manage users</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <form id="user-form" class="user-form" novalidate>
+          <p class="alert" id="user-alert" role="alert" hidden></p>
+          <div class="user-form-grid">
+            <div class="field">
+              <label for="u-username">Username</label>
+              <input id="u-username" type="text" autocomplete="off" maxlength="30" required aria-describedby="e-u-username">
+              <p class="field-error" id="e-u-username"></p>
+            </div>
+            <div class="field">
+              <label for="u-password">Password</label>
+              <input id="u-password" type="password" autocomplete="new-password" maxlength="128" required aria-describedby="e-u-password">
+              <p class="field-error" id="e-u-password"></p>
+            </div>
+            <div class="field">
+              <label for="u-role">Role</label>
+              <select id="u-role">
+                <option value="staff">Staff</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary" id="user-submit">Add user</button>
+          </div>
+          <p class="hint">Staff can add, edit and view students and export CSV. Admins can also delete students, manage users and read the activity log.</p>
+        </form>
+        <ul class="user-list" id="user-list"></ul>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Close</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Reset another user's password (admin) -->
+  <dialog id="reset-dialog" class="dialog-small" aria-labelledby="reset-title">
+    <form id="reset-form" class="dialog-inner" novalidate>
+      <header class="dialog-head">
+        <h2 id="reset-title">Reset password</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <p class="muted" id="reset-text"></p>
+        <div class="field">
+          <label for="reset-password">New password</label>
+          <input id="reset-password" type="password" autocomplete="new-password" maxlength="128" required aria-describedby="e-reset-password">
+          <p class="field-error" id="e-reset-password"></p>
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="reset-submit">Reset password</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Activity log (admin) -->
+  <dialog id="audit-dialog" class="dialog-wide" aria-labelledby="audit-title">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="audit-title">Activity log</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <p class="alert" id="audit-alert" role="alert" hidden></p>
+        <ul class="audit-list" id="audit-list"></ul>
+        <p class="muted small" id="audit-empty" hidden>Nothing recorded yet.</p>
+      </div>
+      <footer class="dialog-foot dialog-foot-split">
+        <span class="muted small" id="audit-page"></span>
+        <div class="foot-actions">
+          <button type="button" class="btn btn-ghost" id="audit-newer">Newer</button>
+          <button type="button" class="btn btn-ghost" id="audit-older">Older</button>
+        </div>
+      </footer>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

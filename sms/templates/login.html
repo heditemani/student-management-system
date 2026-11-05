@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sign in · Student Management</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23C4122F'/%3E%3Cpath d='m16 7 12 6-12 6-12-6 12-6Zm-7 9v5c4 3 10 3 14 0v-5l-7 3.5L9 16Z' fill='%23fff'/%3E%3C/svg%3E">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+</head>
+<body class="login-body">
+  <button class="icon-btn theme-toggle login-theme" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="login-brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11v5c3.6 2.7 8.4 2.7 12 0v-5M22 9v6"/></svg>
+        </span>
+        <div>
+          <h1 id="login-title">Sign in</h1>
+          <p class="muted">Student Management System</p>
+        </div>
+      </div>
+
+      <form id="login-form" novalidate>
+        <p class="alert" id="login-alert" role="alert" hidden></p>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="60" required autofocus>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="show-password">
+          <span>Show password</span>
+        </label>
+        <button class="btn btn-primary btn-block" id="login-submit" type="submit">Sign in</button>
+      </form>
+      <p class="muted small login-help">No account yet? Ask an administrator to create one for you.</p>
+    </section>
+  </main>
+</body>
+</html>
