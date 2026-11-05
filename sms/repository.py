@@ -1,5 +1,6 @@
 """All database access for students. Every query is parameterised."""
 
+import json
 import sqlite3
 from datetime import date
 
@@ -8,7 +9,7 @@ from .validation import DEFAULTS
 
 FIELDS = (
     "student_id", "first_name", "last_name", "email", "phone", "date_of_birth",
-    "gender", "course", "year", "average", "status", "address",
+    "gender", "course", "year", "academic_year", "semester", "average", "status", "address",
 )
 
 # Whitelist: the ?ordering= value is mapped to SQL here, never interpolated.
@@ -52,7 +53,9 @@ def _like(term):
     return f"%{escaped}%"
 
 
-def list_students(search="", course="", status="", ordering=DEFAULT_ORDERING, page=1, page_size=10):
+def list_students(search="", course="", status="", ordering=DEFAULT_ORDERING, page=1, page_size=10,
+                  average_min=None, average_max=None, missing_average=False, year_min=None,
+                  year_max=None, academic_year="", semester=None, created_from="", created_to=""):
     db = get_db()
     where, params = [], []
 
@@ -71,6 +74,32 @@ def list_students(search="", course="", status="", ordering=DEFAULT_ORDERING, pa
     if status:
         where.append("status = ?")
         params.append(status)
+    if average_min is not None:
+        where.append("average >= ?")
+        params.append(average_min)
+    if average_max is not None:
+        where.append("average <= ?")
+        params.append(average_max)
+    if missing_average:
+        where.append("average IS NULL")
+    if year_min is not None:
+        where.append("year >= ?")
+        params.append(year_min)
+    if year_max is not None:
+        where.append("year <= ?")
+        params.append(year_max)
+    if academic_year:
+        where.append("academic_year = ?")
+        params.append(academic_year)
+    if semester is not None:
+        where.append("semester = ?")
+        params.append(semester)
+    if created_from:
+        where.append("date(created_at) >= date(?)")
+        params.append(created_from)
+    if created_to:
+        where.append("date(created_at) <= date(?)")
+        params.append(created_to)
 
     clause = f" WHERE {' AND '.join(where)}" if where else ""
     total = db.execute(f"SELECT COUNT(*) FROM students{clause}", params).fetchone()[0]
@@ -121,7 +150,15 @@ def _duplicate_from_integrity_error(error):
     return None
 
 
-def create_student(data):
+def _record_history(db, student, action, username=""):
+    snapshot = {field: student.get(field) for field in FIELDS}
+    db.execute(
+        "INSERT INTO student_history (student_id, action, username, snapshot) VALUES (?, ?, ?, ?)",
+        (student["student_id"], action, username[:60], json.dumps(snapshot, ensure_ascii=False)),
+    )
+
+
+def create_student(data, username=""):
     db = get_db()
     values = {**DEFAULTS, **data}
     auto_id = "student_id" not in values
@@ -137,8 +174,10 @@ def create_student(data):
                 f"VALUES ({', '.join('?' for _ in columns)})",
                 [values[c] for c in columns],
             )
+            student = get_student(cur.lastrowid)
+            _record_history(db, student, "created", username)
             db.commit()
-            return get_student(cur.lastrowid)
+            return student
         except sqlite3.IntegrityError as error:
             db.rollback()
             duplicate = _duplicate_from_integrity_error(error)
@@ -150,7 +189,7 @@ def create_student(data):
     raise RuntimeError("Could not generate a unique student ID.")
 
 
-def update_student(pk, data):
+def update_student(pk, data, username=""):
     db = get_db()
     _ensure_unique(db, data, exclude_id=pk)
     columns = [f for f in FIELDS if f in data]
@@ -163,6 +202,8 @@ def update_student(pk, data):
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
             [data[c] for c in columns] + [pk],
         )
+        student = get_student(pk)
+        _record_history(db, student, "updated", username)
         db.commit()
     except sqlite3.IntegrityError as error:
         db.rollback()
@@ -173,11 +214,88 @@ def update_student(pk, data):
     return get_student(pk)
 
 
-def delete_student(pk):
+def delete_student(pk, username=""):
     db = get_db()
+    student = get_student(pk)
+    if student is None:
+        return False
+    _record_history(db, student, "deleted", username)
     cur = db.execute("DELETE FROM students WHERE id = ?", (pk,))
     db.commit()
     return cur.rowcount > 0
+
+
+def student_history(student_id):
+    rows = get_db().execute(
+        "SELECT id, at, username, action, snapshot FROM student_history "
+        "WHERE student_id = ? ORDER BY id DESC LIMIT 100",
+        (student_id,),
+    ).fetchall()
+    return [
+        {**dict(row), "snapshot": json.loads(row["snapshot"])}
+        for row in rows
+    ]
+
+
+def duplicate_field(data):
+    try:
+        _ensure_unique(get_db(), data)
+    except DuplicateError as error:
+        return error.field
+    return None
+
+
+def alerts():
+    db = get_db()
+    return dict(db.execute(
+        "SELECT SUM(CASE WHEN average IS NOT NULL AND average < 10 THEN 1 ELSE 0 END) AS low_average, "
+        "SUM(CASE WHEN average IS NULL THEN 1 ELSE 0 END) AS missing_average FROM students"
+    ).fetchone())
+
+
+def import_students(records, username=""):
+    db = get_db()
+    inserted, duplicates = [], []
+    try:
+        db.execute("BEGIN")
+        for row_number, data in records:
+            try:
+                _ensure_unique(db, data)
+            except DuplicateError as error:
+                duplicates.append({"row": row_number, "field": error.field, "message": error.message})
+                continue
+            values = {**DEFAULTS, **data}
+            auto_id = not values.get("student_id")
+            for _attempt in range(5):
+                if auto_id:
+                    values["student_id"] = _next_student_id(db)
+                columns = [field for field in FIELDS if field in values]
+                try:
+                    cur = db.execute(
+                        f"INSERT INTO students ({', '.join(columns)}) "
+                        f"VALUES ({', '.join('?' for _ in columns)})",
+                        [values[field] for field in columns],
+                    )
+                    student = get_student(cur.lastrowid)
+                    _record_history(db, student, "created", username)
+                    inserted.append(student["id"])
+                    break
+                except sqlite3.IntegrityError as error:
+                    duplicate = _duplicate_from_integrity_error(error)
+                    if auto_id and duplicate and duplicate.field == "student_id":
+                        continue
+                    if duplicate:
+                        duplicates.append({"row": row_number, "field": duplicate.field,
+                                           "message": duplicate.message})
+                        break
+                    raise
+            else:
+                raise RuntimeError("Could not generate a unique student ID.")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"created": len(inserted), "duplicates": duplicates}
 
 
 def stats():

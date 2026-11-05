@@ -20,6 +20,7 @@ TEXT_FIELDS = (
     ("first_name", True, 60),
     ("last_name", True, 60),
     ("course", True, 80),
+    ("academic_year", False, 9),
     ("phone", False, 20),
     ("address", False, 200),
 )
@@ -29,6 +30,8 @@ DEFAULTS = {
     "date_of_birth": None,
     "gender": "",
     "year": 1,
+    "academic_year": "",
+    "semester": None,
     "average": None,
     "status": "active",
     "address": "",
@@ -128,6 +131,33 @@ def validate_student(data, partial=False, creating=False):
             errors["year"] = "Year must be a whole number from 1 to 6."
         else:
             clean["year"] = value
+
+    if wanted("academic_year"):
+        value = data.get("academic_year")
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            errors["academic_year"] = "Academic year must be text."
+        else:
+            value = value.strip()
+            if value and not re.fullmatch(r"\d{4}-\d{4}", value):
+                errors["academic_year"] = "Use the format YYYY-YYYY, for example 2026-2027."
+            elif value and int(value[5:]) != int(value[:4]) + 1:
+                errors["academic_year"] = "The end year must be one year after the start year."
+            else:
+                clean["academic_year"] = value
+
+    if wanted("semester"):
+        value = data.get("semester")
+        if value in (None, ""):
+            clean["semester"] = None
+        else:
+            if isinstance(value, str) and value.strip() in ("1", "2"):
+                value = int(value.strip())
+            if not isinstance(value, int) or isinstance(value, bool) or value not in (1, 2):
+                errors["semester"] = "Semester must be 1 or 2."
+            else:
+                clean["semester"] = value
 
     if wanted("average"):
         value = data.get("average")
