@@ -206,6 +206,7 @@
 
   // ---------- stats + courses ----------
   function loadStats() {
+    loadAlerts();
     return api("GET", "/api/stats").then(function (s) {
       $("stat-total").textContent = s.total;
       $("stat-active").textContent = s.active;
@@ -217,7 +218,6 @@
       $("stat-grad-share").textContent = share + "% of all students";
       renderBars(s.by_course || []);
     }).catch(function () { /* the list shows its own error */ });
-    loadAlerts();
   }
 
   function loadAlerts() {
@@ -357,6 +357,8 @@
     $("filter-created-from").value = state.created_from;
     $("filter-created-to").value = state.created_to;
     $("filter-sort").value = state.ordering;
+    $("advanced-filters").open = !!(state.average_min || state.average_max || state.year_min || state.year_max
+      || state.academic_year || state.semester || state.missing_average || state.created_from || state.created_to);
     syncCourseButtons();
   }
 

@@ -218,6 +218,7 @@ Errors: `401 {"detail": "Sign in required."}`, `403` (wrong role or CSRF), `429`
 `ordering`: `name`, `-name`, `student_id`, `-student_id`, `course`, `-course`, `year`, `-year`, `average`, `-average`, `created`, `-created` (default).
 `status`: `active`, `graduated`, `suspended`.
 Advanced filters: `average_min`, `average_max`, `year_min`, `year_max`, `academic_year`, `semester`, `missing_average`, `created_from`, `created_to`.
+The authenticated printable report is at `/reports/print` and accepts the same filters.
 
 ### Administration (admin only)
 

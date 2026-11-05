@@ -95,6 +95,9 @@ def init_db():
             "UPDATE student_history SET student_pk = COALESCE("
             "(SELECT id FROM students WHERE students.student_id = student_history.student_id), 0)"
         )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_student_history_student_pk ON student_history (student_pk, id DESC)"
+    )
     conn.commit()
 
 
