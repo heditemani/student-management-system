@@ -4,6 +4,9 @@ import os
 import sys
 import tempfile
 import unittest
+import sqlite3
+import io
+import json
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -81,6 +84,15 @@ class CreateTests(ApiTestCase):
         self.assertEqual(body["year"], 1)
         self.assertEqual(body["status"], "active")
         self.assertIsNone(body["average"])
+
+    def test_academic_period_is_validated_and_returned(self):
+        body = self.create(academic_year="2026-2027", semester=2)
+        self.assertEqual((body["academic_year"], body["semester"]), ("2026-2027", 2))
+        for field, value in (("academic_year", "2026-2028"), ("semester", 3)):
+            with self.subTest(field=field):
+                response = self.client.post("/api/students", json=student(**{field: value}))
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.get_json()["errors"])
 
     def test_email_is_normalised(self):
         body = self.create(email="  Amira@Example.COM ")
@@ -281,6 +293,119 @@ class DeleteAndStatsTests(ApiTestCase):
                                                {"course": "Web Development", "count": 1}]})
         self.assertEqual(self.client.get("/api/courses").get_json(), ["Data Science", "Web Development"])
 
+    def test_grade_alerts(self):
+        self.create(email="low@example.com", average=9.5)
+        self.create(email="missing@example.com", average=None)
+        self.create(email="ok@example.com", average=12)
+        self.assertEqual(self.client.get("/api/alerts").get_json(),
+                         {"low_average": 1, "missing_average": 1})
+
+
+class AddedFeatureTests(ApiTestCase):
+    def test_student_history_records_create_update_and_delete(self):
+        created = self.create(academic_year="2026-2027", semester=1)
+        updated = self.client.patch(
+            f"/api/students/{created['id']}",
+            json={"average": 17, "student_id": "STU-CHANGED-1"},
+        )
+        self.assertEqual(updated.status_code, 200)
+        history = self.client.get(f"/api/students/{created['id']}/history").get_json()
+        self.assertEqual([entry["action"] for entry in history], ["updated", "created"])
+        self.assertEqual(history[0]["snapshot"]["average"], 17)
+        self.assertEqual(history[1]["snapshot"]["student_id"], created["student_id"])
+        self.client.delete(f"/api/students/{created['id']}")
+
+    def test_advanced_filters_include_academic_period_and_grade(self):
+        self.create(email="period1@example.com", academic_year="2026-2027", semester=1, average=8)
+        self.create(email="period2@example.com", academic_year="2026-2027", semester=2, average=15)
+        result = self.client.get(
+            "/api/students?academic_year=2026-2027&semester=1&average_max=10"
+        ).get_json()
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["results"][0]["email"], "period1@example.com")
+
+    def test_csv_import_preview_skips_duplicate_and_invalid_rows(self):
+        self.create(email="existing@example.com")
+        content = (
+            "first_name,last_name,email,course,academic_year,semester\n"
+            "Sara,Ali,sara@example.com,Math,2026-2027,1\n"
+            "Existing,Student,existing@example.com,Math,,\n"
+            "Invalid,Student,not-an-email,Math,,\n"
+        ).encode()
+        response = self.client.post(
+            "/api/students/import/preview",
+            data={"file": (io.BytesIO(content), "students.csv")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual((response.json["valid"], len(response.json["duplicates"]),
+                          len(response.json["errors"])), (1, 1, 1))
+        self.assertEqual(response.json["sample"][0]["email"], "sara@example.com")
+        imported = self.client.post(
+            "/api/students/import",
+            data={"file": (io.BytesIO(content), "students.csv")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(imported.status_code, 200, imported.get_data(as_text=True))
+        self.assertEqual(imported.json["created"], 1)
+        self.assertEqual(imported.json["duplicates"][0]["field"], "email")
+
+    def test_backup_restore_preserves_accounts_and_student_history(self):
+        self.create(email="before@example.com")
+        backup = self.client.get("/api/backup")
+        self.assertEqual(backup.status_code, 200)
+        self.assertIn("application/json", backup.content_type)
+        self.create(email="after@example.com")
+        restored = self.client.post(
+            "/api/backup/restore",
+            data={"file": (io.BytesIO(backup.data), "backup.json")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        self.assertEqual(restored.json["restored"], 1)
+        students = self.client.get("/api/students").json["results"]
+        self.assertEqual([student["email"] for student in students], ["before@example.com"])
+        self.assertIsNotNone(self.client.get("/api/auth/me").json["username"])
+
+    def test_backup_restore_keeps_history_for_deleted_students(self):
+        created = self.create(email="deleted@example.com")
+        self.client.delete(f"/api/students/{created['id']}")
+        backup = self.client.get("/api/backup")
+        restored = self.client.post(
+            "/api/backup/restore",
+            data={"file": (io.BytesIO(backup.data), "backup.json")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        self.assertEqual(restored.json["restored"], 0)
+        self.assertEqual(restored.json["history"], 2)
+
+    def test_backup_restore_rejects_invalid_file_without_changing_records(self):
+        created = self.create(email="keep@example.com")
+        response = self.client.post(
+            "/api/backup/restore",
+            data={"file": (io.BytesIO(json.dumps({
+                "version": 1, "students": [{"email": "invalid"}], "history": []
+            }).encode()), "bad.json")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.client.get(f"/api/students/{created['id']}").json["email"], "keep@example.com")
+
+    def test_backup_is_admin_only(self):
+        staff_client = self.app.test_client()
+        sign_in(staff_client, STAFF)
+        self.assertEqual(staff_client.get("/api/backup").status_code, 403)
+        self.assertEqual(staff_client.post("/api/backup/restore").status_code, 403)
+
+    def test_print_report_uses_authenticated_filtered_data(self):
+        self.create(email="report@example.com", academic_year="2026-2027", semester=1)
+        response = self.client.get("/reports/print?academic_year=2026-2027")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"report@example.com", response.data)
+        self.assertIn(b"Print / Save as PDF", response.data)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
 
 class PageTests(ApiTestCase):
     def test_home_page_and_headers(self):
@@ -290,12 +415,46 @@ class PageTests(ApiTestCase):
         self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
+    def test_report_requires_authentication(self):
+        response = self.app.test_client().get("/reports/print")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/")
+
     def test_static_assets_are_served(self):
         self.assertEqual(self.client.get("/static/css/app.css").status_code, 200)
         self.assertEqual(self.client.get("/static/js/app.js").status_code, 200)
 
     def test_api_responses_are_not_cached(self):
         self.assertEqual(self.client.get("/api/stats").headers["Cache-Control"], "no-store")
+
+
+class MigrationTests(unittest.TestCase):
+    def test_existing_database_gets_academic_period_columns(self):
+        handle, path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        connection = sqlite3.connect(path)
+        connection.execute(
+            "CREATE TABLE students (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT NOT NULL UNIQUE, "
+            "first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL "
+            "DEFAULT '', date_of_birth TEXT, gender TEXT NOT NULL DEFAULT '', course TEXT NOT NULL, year INTEGER "
+            "NOT NULL DEFAULT 1, average REAL, status TEXT NOT NULL DEFAULT 'active', address TEXT NOT NULL "
+            "DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO students (student_id, first_name, last_name, email, course, created_at, updated_at) "
+            "VALUES ('STU-OLD-1', 'Old', 'Student', 'old@example.com', 'History', '2025-01-01T00:00:00Z', "
+            "'2025-01-01T00:00:00Z')"
+        )
+        connection.commit()
+        connection.close()
+        try:
+            app = create_app({"DATABASE": path, "TESTING": True, "SECRET_KEY": "migration-test"})
+            from sms import repository
+            with app.app_context():
+                migrated = repository.get_student(1)
+            self.assertEqual((migrated["academic_year"], migrated["semester"]), ("", None))
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":

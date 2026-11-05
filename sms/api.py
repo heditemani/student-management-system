@@ -5,6 +5,7 @@ import io
 import math
 import re
 from datetime import date
+
 from werkzeug.exceptions import BadRequest
 
 from flask import Blueprint, Response, abort, g, jsonify, request, url_for
@@ -23,7 +24,7 @@ CSV_COLUMNS = (
 )
 _NUMBER_LIKE = re.compile(r"^[+-]?[\d\s().-]+$")
 IMPORT_COLUMNS = set(repo.FIELDS)
-IMPORT_LIMIT = 5000
+IMPORT_LIMIT = 10_000
 
 
 def _json_body():
@@ -127,6 +128,8 @@ def _read_import():
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         abort(400, description="Choose a CSV file to import.")
+    if not upload.filename.lower().endswith(".csv"):
+        abort(400, description="Choose a file with the .csv extension.")
     try:
         content = upload.read().decode("utf-8-sig")
     except UnicodeDecodeError as error:
@@ -142,33 +145,36 @@ def _read_import():
         abort(400, description="CSV file does not contain supported student fields.")
 
     records, errors, duplicates, seen = [], [], [], {"email": set(), "student_id": set()}
-    for row_number, raw in enumerate(reader, 2):
-        if row_number > IMPORT_LIMIT + 1:
-            abort(400, description=f"CSV import is limited to {IMPORT_LIMIT} rows.")
-        data = {(key or "").strip().lower(): (value or "").strip()
-                for key, value in raw.items() if key and key.strip().lower() in IMPORT_COLUMNS}
-        clean, field_errors = validate_student(data, creating=True)
-        if field_errors:
-            errors.append({"row": row_number, "errors": field_errors})
-            continue
-        duplicate = repo.duplicate_field(clean)
-        if not duplicate:
+    try:
+        for row_number, raw in enumerate(reader, 2):
+            if row_number > IMPORT_LIMIT + 1:
+                abort(400, description=f"CSV import is limited to {IMPORT_LIMIT} rows.")
+            data = {(key or "").strip().lower(): (value or "").strip()
+                    for key, value in raw.items() if key and key.strip().lower() in IMPORT_COLUMNS}
+            clean, field_errors = validate_student(data, creating=True)
+            if field_errors:
+                errors.append({"row": row_number, "errors": field_errors})
+                continue
+            duplicate = repo.duplicate_field(clean)
+            if not duplicate:
+                for field in ("email", "student_id"):
+                    value = clean.get(field)
+                    if value:
+                        normalized = value.casefold()
+                        if normalized in seen[field]:
+                            duplicate = field
+                            break
+            if duplicate:
+                seen_value = clean.get(duplicate, "")
+                duplicates.append({"row": row_number, "field": duplicate,
+                                   "message": f"Duplicate {duplicate.replace('_', ' ')}: {seen_value}."})
+                continue
             for field in ("email", "student_id"):
-                value = clean.get(field)
-                if value:
-                    normalized = value.casefold()
-                    if normalized in seen[field]:
-                        duplicate = field
-                        break
-        if duplicate:
-            seen_value = clean.get(duplicate, "")
-            duplicates.append({"row": row_number, "field": duplicate,
-                               "message": f"Duplicate {duplicate.replace('_', ' ')}: {seen_value}."})
-            continue
-        for field in ("email", "student_id"):
-            if clean.get(field):
-                seen[field].add(clean[field].casefold())
-        records.append((row_number, clean))
+                if clean.get(field):
+                    seen[field].add(clean[field].casefold())
+            records.append((row_number, clean))
+    except csv.Error as error:
+        abort(400, description=f"Invalid CSV file: {error}")
     return records, errors, duplicates
 
 
@@ -228,8 +234,19 @@ def list_students():
 @api.post("/students/import/preview")
 def preview_student_import():
     records, errors, duplicates = _read_import()
+    sample = []
+    for row_number, record in records[:10]:
+        sample.append({
+            "row": row_number,
+            "student_id": record.get("student_id") or "Generated on import",
+            "name": record["first_name"] + " " + record["last_name"],
+            "email": record["email"],
+            "course": record["course"],
+            "academic_year": record.get("academic_year") or "",
+            "semester": record.get("semester"),
+        })
     return jsonify(valid=len(records), duplicates=duplicates, errors=errors,
-                   total=len(records) + len(duplicates) + len(errors))
+                   total=len(records) + len(duplicates) + len(errors), sample=sample)
 
 
 @api.post("/students/import")
@@ -265,8 +282,8 @@ def get_student(pk):
 
 @api.get("/students/<int:pk>/history")
 def get_student_history(pk):
-    student = _get_or_404(pk)
-    return jsonify(repo.student_history(student["student_id"]))
+    _get_or_404(pk)
+    return jsonify(repo.student_history(pk))
 
 
 def _update(pk, partial):

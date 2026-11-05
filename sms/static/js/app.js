@@ -12,11 +12,15 @@
   var STATUS_LABELS = { active: "Active", graduated: "Graduated", suspended: "Suspended" };
   var GENDER_LABELS = { female: "Female", male: "Male", other: "Other", "": "Not specified" };
   var FIELDS = ["first_name", "last_name", "email", "phone", "student_id", "date_of_birth",
-    "gender", "course", "year", "average", "status", "address"];
+    "gender", "course", "year", "academic_year", "semester", "average", "status", "address"];
 
   var $ = function (id) { return document.getElementById(id); };
 
-  var state = { page: 1, pageSize: 10, search: "", course: "", status: "", ordering: "-created", total: 0, pages: 1 };
+  var state = {
+    page: 1, pageSize: 10, search: "", course: "", status: "", ordering: "-created", total: 0, pages: 1,
+    average_min: "", average_max: "", year_min: "", year_max: "", academic_year: "", semester: "",
+    missing_average: false, created_from: "", created_to: ""
+  };
   var ROLE = document.body.getAttribute("data-role");
   var ME = (document.body.getAttribute("data-user") || "").toLowerCase();
   var CSRF = document.body.getAttribute("data-csrf") || "";
@@ -153,6 +157,44 @@
     if (dialog.open) dialog.close();
   }
 
+  function openHistory(student) {
+    $("history-student").textContent = student.full_name + " · " + student.student_id;
+    $("history-list").textContent = "";
+    $("history-empty").hidden = true;
+    $("history-alert").hidden = true;
+    openDialog($("history-dialog"));
+    api("GET", "/api/students/" + student.id + "/history").then(function (entries) {
+      var list = $("history-list");
+      var previous = null;
+      entries.slice().reverse().forEach(function (entry) {
+        var title = entry.action.charAt(0).toUpperCase() + entry.action.slice(1);
+        var details = [];
+        if (entry.action === "updated" && previous) {
+          FIELDS.forEach(function (field) {
+            if (previous[field] !== entry.snapshot[field]) {
+              var before = previous[field] === null || previous[field] === "" ? "—" : String(previous[field]);
+              var after = entry.snapshot[field] === null || entry.snapshot[field] === "" ? "—" : String(entry.snapshot[field]);
+              details.push(field.replace(/_/g, " ") + ": " + before + " → " + after);
+            }
+          });
+        }
+        list.appendChild(el("li", null, [
+          el("div", { "class": "history-heading" }, [
+            el("strong", { text: title }),
+            el("span", { "class": "muted small", text: formatDateTime(entry.at) })
+          ]),
+          el("p", { "class": "muted small", text: entry.username ? "By " + entry.username : "System action" }),
+          details.length ? el("p", { "class": "history-changes", text: details.join(" · ") }) : null
+        ]));
+        previous = entry.snapshot;
+      });
+      $("history-empty").hidden = entries.length > 0;
+    }).catch(function (err) {
+      $("history-alert").textContent = messageFor(err);
+      $("history-alert").hidden = false;
+    });
+  }
+
   function restoreFocus() {
     if (lastFocus && document.contains(lastFocus) && lastFocus.offsetParent !== null) lastFocus.focus();
     else {
@@ -175,6 +217,42 @@
       $("stat-grad-share").textContent = share + "% of all students";
       renderBars(s.by_course || []);
     }).catch(function () { /* the list shows its own error */ });
+    loadAlerts();
+  }
+
+  function loadAlerts() {
+    api("GET", "/api/alerts").then(function (data) {
+      var panel = $("alerts-panel"), list = $("alert-items");
+      list.textContent = "";
+      [
+        { key: "low_average", label: "Below 10/20", max: "9.99" },
+        { key: "missing_average", label: "Missing average", missing: true }
+      ].forEach(function (item) {
+        var count = Number(data[item.key] || 0);
+        if (!count) return;
+        var button = el("button", {
+          type: "button", "class": "alert-card",
+          "aria-label": "Show " + count + " students: " + item.label
+        }, [
+          el("span", { "class": "alert-count", text: String(count) }),
+          el("span", { "class": "alert-copy" }, [
+            el("strong", { text: item.label }),
+            el("span", { "class": "muted small", text: "View matching students" })
+          ]),
+          el("span", { "class": "alert-arrow", text: "→", "aria-hidden": "true" })
+        ]);
+        button.addEventListener("click", function () {
+          clearFilterState();
+          if (item.missing) state.missing_average = true;
+          else state.average_max = item.max;
+          markFiltersChanged();
+          syncFilterControls();
+          loadList(true);
+        });
+        list.appendChild(button);
+      });
+      panel.hidden = !list.children.length;
+    }).catch(function () { /* the student list shows its own error */ });
   }
 
   function renderBars(byCourse) {
@@ -207,6 +285,7 @@
         state.course = state.course === item.course ? "" : item.course;
         $("filter-course").value = state.course;
         state.page = 1;
+        markFiltersChanged();
         syncCourseButtons();
         loadList(true);
       });
@@ -243,7 +322,67 @@
 
   // ---------- list ----------
   function hasFilters() {
-    return !!(state.search || state.course || state.status);
+    return !!(state.search || state.course || state.status || state.average_min || state.average_max
+      || state.year_min || state.year_max || state.academic_year || state.semester
+      || state.missing_average || state.created_from || state.created_to);
+  }
+
+  function clearFilterState() {
+    state.search = "";
+    state.course = "";
+    state.status = "";
+    state.average_min = "";
+    state.average_max = "";
+    state.year_min = "";
+    state.year_max = "";
+    state.academic_year = "";
+    state.semester = "";
+    state.missing_average = false;
+    state.created_from = "";
+    state.created_to = "";
+    state.page = 1;
+  }
+
+  function syncFilterControls() {
+    $("search").value = state.search;
+    $("filter-course").value = state.course;
+    $("filter-status").value = state.status;
+    $("filter-average-min").value = state.average_min;
+    $("filter-average-max").value = state.average_max;
+    $("filter-year-min").value = state.year_min;
+    $("filter-year-max").value = state.year_max;
+    $("filter-academic-year").value = state.academic_year;
+    $("filter-semester").value = state.semester;
+    $("filter-missing-average").checked = state.missing_average;
+    $("filter-created-from").value = state.created_from;
+    $("filter-created-to").value = state.created_to;
+    $("filter-sort").value = state.ordering;
+    syncCourseButtons();
+  }
+
+  function markFiltersChanged() {
+    $("saved-filters").value = "";
+    $("delete-filter-btn").disabled = true;
+  }
+
+  function currentFilters() {
+    return {
+      search: state.search, course: state.course, status: state.status, ordering: state.ordering,
+      average_min: state.average_min, average_max: state.average_max,
+      year_min: state.year_min, year_max: state.year_max, academic_year: state.academic_year,
+      semester: state.semester, missing_average: state.missing_average,
+      created_from: state.created_from, created_to: state.created_to
+    };
+  }
+
+  function queryForFilters(filters) {
+    var params = new URLSearchParams();
+    Object.keys(filters).forEach(function (key) {
+      if (filters[key] !== "" && filters[key] !== false && filters[key] !== null && filters[key] !== undefined) {
+        params.set(key, String(filters[key]));
+      }
+    });
+    return params;
   }
 
   function renderSkeleton() {
@@ -283,7 +422,9 @@
       el("td", { role: "cell", "class": "cell-person" }, [person]),
       el("td", { role: "cell", "data-label": "ID", "class": "mono", text: s.student_id }),
       el("td", { role: "cell", "data-label": "Course" }, [
-        document.createTextNode(s.course + " · Y" + s.year)
+        document.createTextNode(s.course + " · Y" + s.year
+          + (s.academic_year ? " · " + s.academic_year : "")
+          + (s.semester ? " · S" + s.semester : ""))
       ]),
       el("td", { role: "cell", "data-label": "Average", "class": "mono", text: formatAverage(s.average) }),
       el("td", { role: "cell", "data-label": "Status" }, [chip(s.status)]),
@@ -351,9 +492,7 @@
   function loadList(scrollUp) {
     var request = ++listRequest;
     var params = new URLSearchParams({ page: state.page, page_size: state.pageSize, ordering: state.ordering });
-    if (state.search) params.set("search", state.search);
-    if (state.course) params.set("course", state.course);
-    if (state.status) params.set("status", state.status);
+    queryForFilters(currentFilters()).forEach(function (value, key) { params.set(key, value); });
 
     var region = $("list-region");
     region.setAttribute("aria-busy", "true");
@@ -389,11 +528,9 @@
   }
 
   function clearFilters() {
-    state.search = ""; state.course = ""; state.status = ""; state.page = 1;
-    $("search").value = "";
-    $("filter-course").value = "";
-    $("filter-status").value = "";
-    syncCourseButtons();
+    clearFilterState();
+    syncFilterControls();
+    markFiltersChanged();
     loadList();
   }
 
@@ -410,6 +547,8 @@
       ["Gender", GENDER_LABELS[s.gender] || "–"],
       ["Course", s.course],
       ["Year", "Year " + s.year],
+      ["Academic year", s.academic_year || "–"],
+      ["Semester", s.semester ? "Semester " + s.semester : "–"],
       ["Average", s.average === null ? "–" : formatAverage(s.average) + " / 20"],
       ["Status", null, chip(s.status)],
       ["Address", s.address || "–", null, true],
@@ -426,6 +565,7 @@
     $("details-edit").onclick = function () { closeDialog($("details-dialog")); openForm(s); };
     $("details-delete").hidden = !IS_ADMIN;
     $("details-delete").onclick = function () { closeDialog($("details-dialog")); askDelete(s); };
+    $("details-history").onclick = function () { openHistory(s); };
     openDialog($("details-dialog"));
   }
 
@@ -480,6 +620,7 @@
     FIELDS.forEach(function (name) {
       var raw = fieldInput(name).value.trim();
       if (name === "year") data[name] = raw ? parseInt(raw, 10) : null;
+      else if (name === "semester") data[name] = raw ? parseInt(raw, 10) : null;
       else if (name === "average") data[name] = raw === "" ? null : raw;
       else if (name === "date_of_birth") data[name] = raw || null;
       else data[name] = raw;
@@ -513,8 +654,10 @@
       toast(saved.full_name + (wasEditing ? " updated." : " added."));
       if (!wasEditing) {
         // show the new record: newest first, no filters hiding it
-        state.page = 1; state.search = ""; state.course = ""; state.status = ""; state.ordering = "-created";
-        $("search").value = ""; $("filter-status").value = ""; $("filter-sort").value = "-created";
+        clearFilterState();
+        state.ordering = "-created";
+        syncFilterControls();
+        markFiltersChanged();
       }
       return refreshAll();
     }).catch(function (err) {
@@ -617,10 +760,7 @@
 
   // ---------- export ----------
   function exportCsv() {
-    var params = new URLSearchParams({ ordering: state.ordering });
-    if (state.search) params.set("search", state.search);
-    if (state.course) params.set("course", state.course);
-    if (state.status) params.set("status", state.status);
+    var params = queryForFilters(currentFilters());
     var button = $("export-btn");
     button.disabled = true;
     fetch("/api/students/export.csv?" + params.toString(), { headers: { Accept: "text/csv" } }).then(function (response) {
@@ -638,6 +778,158 @@
     }).catch(function (err) {
       if (!(err instanceof ApiError && err.status === 401)) toast(messageFor(err), true);
     }).then(function () { button.disabled = false; });
+  }
+
+  function uploadFile(path, file) {
+    var form = new FormData();
+    form.append("file", file);
+    return fetch(path, {
+      method: "POST",
+      headers: { "X-CSRF-Token": CSRF, Accept: "application/json" },
+      body: form
+    }).then(function (response) {
+      return response.json().catch(function () { return null; }).then(function (data) {
+        if (response.status === 401) window.location.reload();
+        if (!response.ok) throw new ApiError(response.status, data);
+        return data;
+      });
+    }, function () {
+      throw new ApiError(0, { detail: "Cannot reach the server. Check your connection and try again." });
+    });
+  }
+
+  function showImportResult(result) {
+    var summary = $("import-summary"), list = $("import-errors"), sample = $("import-sample");
+    summary.textContent = result.valid + " valid rows · " + result.duplicates.length
+      + " duplicates will be skipped · " + result.errors.length + " invalid rows will be skipped.";
+    summary.hidden = false;
+    list.textContent = "";
+    sample.textContent = "";
+    result.sample.forEach(function (item) {
+      var period = item.academic_year
+        ? item.academic_year + (item.semester ? " · S" + item.semester : "")
+        : "No study period";
+      sample.appendChild(el("li", null, [
+        el("strong", { text: item.name }),
+        el("span", { "class": "muted small", text: item.email + " · " + item.course + " · " + period }),
+        el("span", { "class": "mono small", text: item.student_id })
+      ]));
+    });
+    if (result.valid > result.sample.length) {
+      sample.appendChild(el("li", { "class": "muted small",
+        text: "Showing " + result.sample.length + " of " + result.valid + " valid rows." }));
+    }
+    result.duplicates.concat(result.errors).slice(0, 50).forEach(function (item) {
+      var description = item.message || Object.keys(item.errors || {}).map(function (field) {
+        return field.replace(/_/g, " ") + ": " + item.errors[field];
+      }).join("; ");
+      list.appendChild(el("li", { text: "Row " + item.row + ": " + description }));
+    });
+    if (result.duplicates.length + result.errors.length > 50) {
+      list.appendChild(el("li", { text: "Only the first 50 skipped rows are shown." }));
+    }
+    $("import-submit").disabled = result.valid === 0;
+  }
+
+  var previewedImportFile = null;
+
+  function previewImport() {
+    var file = $("import-file").files[0];
+    previewedImportFile = null;
+    $("import-alert").hidden = true;
+    $("import-summary").hidden = true;
+    $("import-sample").textContent = "";
+    $("import-errors").textContent = "";
+    $("import-submit").disabled = true;
+    if (!file) {
+      $("import-alert").textContent = "Choose a CSV file first.";
+      $("import-alert").hidden = false;
+      return;
+    }
+    var button = $("import-preview");
+    button.disabled = true;
+    uploadFile("/api/students/import/preview", file).then(function (result) {
+      if ($("import-file").files[0] !== file) return;
+      previewedImportFile = file;
+      showImportResult(result);
+    }).catch(function (err) {
+      if ($("import-file").files[0] !== file) return;
+      $("import-alert").textContent = messageFor(err);
+      $("import-alert").hidden = false;
+    }).then(function () { button.disabled = false; });
+  }
+
+  function submitImport() {
+    var file = $("import-file").files[0];
+    if (!file || file !== previewedImportFile) {
+      toast("Preview the selected CSV file before importing.", true);
+      $("import-submit").disabled = true;
+      return;
+    }
+    var button = $("import-submit");
+    button.disabled = true;
+    uploadFile("/api/students/import", file).then(function (result) {
+      previewedImportFile = null;
+      closeDialog($("import-dialog"));
+      toast(result.created + " students imported; " + result.duplicates.length
+        + " duplicates and " + result.errors.length + " invalid rows skipped.");
+      return refreshAll();
+    }).catch(function (err) {
+      $("import-alert").textContent = messageFor(err);
+      $("import-alert").hidden = false;
+    }).then(function () { button.disabled = false; });
+  }
+
+  function printReport() {
+    var query = queryForFilters(currentFilters());
+    window.open("/reports/print?" + query.toString(), "_blank", "noopener");
+  }
+
+  function downloadBackup() {
+    var button = $("backup-download");
+    button.disabled = true;
+    fetch("/api/backup", { headers: { Accept: "application/json" } }).then(function (response) {
+      if (response.status === 401) { window.location.reload(); throw new ApiError(401, null); }
+      if (!response.ok) throw new ApiError(response.status, { detail: "Backup download failed." });
+      return response.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var link = el("a", { href: url, download: "student-management-backup-" + new Date().toISOString().slice(0, 10) + ".json" });
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      toast("Backup downloaded. Store it somewhere safe.");
+    }).catch(function (err) {
+      if (!(err instanceof ApiError && err.status === 401)) toast(messageFor(err), true);
+    }).then(function () { button.disabled = false; });
+  }
+
+  function restoreBackup() {
+    var file = $("backup-file").files[0];
+    if (!file) {
+      $("backup-alert").textContent = "Choose a backup JSON file first.";
+      $("backup-alert").hidden = false;
+      return;
+    }
+    $("backup-alert").hidden = true;
+    askConfirm({
+      title: "Replace all student data?",
+      text: "This restores " + file.name + " and replaces every current student record and history entry. User accounts will not change.",
+      button: "Restore backup",
+      onConfirm: function () {
+        $("confirm-ok").textContent = "Restoring…";
+        return uploadFile("/api/backup/restore", file).then(function (result) {
+          closeDialog($("backup-dialog"));
+          toast("Restored " + result.restored + " students and " + result.history + " history entries.");
+          return refreshAll();
+        }).catch(function (err) {
+          $("backup-alert").textContent = messageFor(err);
+          $("backup-alert").hidden = false;
+          throw err;
+        });
+      }
+    });
   }
 
   // ---------- change own password ----------
@@ -813,7 +1105,9 @@
     "password.change": "changed their password", "student.create": "added student",
     "student.update": "updated student", "student.delete": "deleted student",
     "students.export": "exported CSV:", "user.create": "created user",
-    "user.update": "updated user", "user.delete": "deleted user"
+    "user.update": "updated user", "user.delete": "deleted user",
+    "students.import": "imported students:", "backup.export": "downloaded backup:",
+    "backup.restore": "restored backup:"
   };
 
   function formatDateTime(value) {
@@ -851,11 +1145,127 @@
     loadAudit(1);
   }
 
+  var PRESET_KEY = "sms-filter-presets";
+
+  function readPresets() {
+    try {
+      var value = JSON.parse(localStorage.getItem(PRESET_KEY) || "[]");
+      return Array.isArray(value) ? value.filter(function (item) {
+        return item && typeof item.name === "string" && item.filters && typeof item.filters === "object";
+      }).slice(0, 20) : [];
+    } catch (error) {
+      toast("Saved filters could not be read from this browser.", true);
+      return [];
+    }
+  }
+
+  function renderPresets(selected) {
+    var select = $("saved-filters"), presets = readPresets();
+    select.textContent = "";
+    select.appendChild(el("option", { value: "", text: "Saved filters…" }));
+    presets.forEach(function (preset) {
+      select.appendChild(el("option", { value: preset.name, text: preset.name }));
+    });
+    select.value = selected || "";
+    $("delete-filter-btn").disabled = !select.value;
+  }
+
+  function savePreset(name) {
+    var presets = readPresets();
+    var existing = presets.findIndex(function (preset) { return preset.name.toLowerCase() === name.toLowerCase(); });
+    var saved = { name: name, filters: currentFilters() };
+    if (existing >= 0) presets[existing] = saved;
+    else if (presets.length < 20) presets.push(saved);
+    else {
+      toast("You can save up to 20 filters. Delete one before adding another.", true);
+      return;
+    }
+    try {
+      localStorage.setItem(PRESET_KEY, JSON.stringify(presets));
+      renderPresets(name);
+      toast(existing >= 0 ? "Saved filter updated." : "Filter saved in this browser.");
+    } catch (error) {
+      toast("Could not save this filter in the browser storage.", true);
+    }
+  }
+
+  function selectPreset() {
+    var preset = readPresets().find(function (item) { return item.name === $("saved-filters").value; });
+    if (!preset) {
+      $("delete-filter-btn").disabled = true;
+      return;
+    }
+    clearFilterState();
+    Object.keys(currentFilters()).forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(preset.filters, key)) state[key] = preset.filters[key];
+    });
+    state.page = 1;
+    syncFilterControls();
+    $("delete-filter-btn").disabled = false;
+    loadList();
+  }
+
+  function deletePreset() {
+    var name = $("saved-filters").value;
+    if (!name) return;
+    askConfirm({
+      title: "Delete saved filter?",
+      text: "Remove “" + name + "” from this browser?",
+      button: "Delete filter",
+      onConfirm: function () {
+        var presets = readPresets().filter(function (preset) { return preset.name !== name; });
+        try {
+          localStorage.setItem(PRESET_KEY, JSON.stringify(presets));
+          renderPresets();
+          toast("Saved filter deleted.");
+        } catch (error) {
+          toast("Could not update saved filters in browser storage.", true);
+        }
+      }
+    });
+  }
+
   // ---------- wiring ----------
   function init() {
     applyThemeLabel();
+    renderPresets();
     $("theme-toggle").addEventListener("click", toggleTheme);
     $("add-btn").addEventListener("click", function () { openForm(null); });
+    $("import-btn").addEventListener("click", function () {
+      $("import-file").value = "";
+      previewedImportFile = null;
+      $("import-summary").hidden = true;
+      $("import-sample").textContent = "";
+      $("import-errors").textContent = "";
+      $("import-alert").hidden = true;
+      $("import-submit").disabled = true;
+      openDialog($("import-dialog"));
+    });
+    $("import-preview").addEventListener("click", previewImport);
+    $("import-submit").addEventListener("click", submitImport);
+    $("import-file").addEventListener("change", function () {
+      previewedImportFile = null;
+      $("import-summary").hidden = true;
+      $("import-sample").textContent = "";
+      $("import-errors").textContent = "";
+      $("import-submit").disabled = true;
+      $("import-alert").hidden = true;
+    });
+    $("report-btn").addEventListener("click", printReport);
+    $("save-filter-btn").addEventListener("click", function () {
+      $("preset-form").reset();
+      openDialog($("preset-dialog"));
+      $("preset-name").focus();
+    });
+    $("preset-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      var name = $("preset-name").value.trim();
+      if (!name) return;
+      savePreset(name);
+      closeDialog($("preset-dialog"));
+    });
+    $("saved-filters").addEventListener("change", selectPreset);
+    $("delete-filter-btn").addEventListener("click", deletePreset);
     $("empty-action").addEventListener("click", function () {
       if (hasFilters()) clearFilters(); else openForm(null);
     });
@@ -865,17 +1275,37 @@
     var onSearch = debounce(function () {
       var value = $("search").value.trim();
       if (value === state.search) return;
-      state.search = value; state.page = 1; loadList();
+      state.search = value; state.page = 1; markFiltersChanged(); loadList();
     }, 300);
     $("search").addEventListener("input", onSearch);
     $("filter-course").addEventListener("change", function () {
       state.course = this.value;
       state.page = 1;
+      markFiltersChanged();
       syncCourseButtons();
       loadList();
     });
-    $("filter-status").addEventListener("change", function () { state.status = this.value; state.page = 1; loadList(); });
-    $("filter-sort").addEventListener("change", function () { state.ordering = this.value; state.page = 1; loadList(); });
+    $("filter-status").addEventListener("change", function () { state.status = this.value; state.page = 1; markFiltersChanged(); loadList(); });
+    $("filter-sort").addEventListener("change", function () { state.ordering = this.value; state.page = 1; markFiltersChanged(); loadList(); });
+    [
+      ["filter-average-min", "average_min"], ["filter-average-max", "average_max"],
+      ["filter-year-min", "year_min"], ["filter-year-max", "year_max"],
+      ["filter-academic-year", "academic_year"], ["filter-semester", "semester"],
+      ["filter-created-from", "created_from"], ["filter-created-to", "created_to"]
+    ].forEach(function (pair) {
+      $(pair[0]).addEventListener("change", function () {
+        state[pair[1]] = this.value;
+        state.page = 1;
+        markFiltersChanged();
+        loadList();
+      });
+    });
+    $("filter-missing-average").addEventListener("change", function () {
+      state.missing_average = this.checked;
+      state.page = 1;
+      markFiltersChanged();
+      loadList();
+    });
 
     $("student-form").addEventListener("submit", submitForm);
     $("confirm-ok").addEventListener("click", runConfirm);
@@ -894,6 +1324,13 @@
     if (IS_ADMIN) {
       $("menu-users").addEventListener("click", fromMenu(openUsers));
       $("menu-audit").addEventListener("click", fromMenu(openAudit));
+      $("menu-backup").addEventListener("click", fromMenu(function () {
+        $("backup-file").value = "";
+        $("backup-alert").hidden = true;
+        openDialog($("backup-dialog"));
+      }));
+      $("backup-download").addEventListener("click", downloadBackup);
+      $("backup-restore").addEventListener("click", restoreBackup);
       $("user-form").addEventListener("submit", submitUser);
       $("reset-form").addEventListener("submit", submitReset);
       $("audit-newer").addEventListener("click", function () { loadAudit(Math.max(1, auditPage - 1)); });

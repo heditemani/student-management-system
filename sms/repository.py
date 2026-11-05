@@ -153,8 +153,10 @@ def _duplicate_from_integrity_error(error):
 def _record_history(db, student, action, username=""):
     snapshot = {field: student.get(field) for field in FIELDS}
     db.execute(
-        "INSERT INTO student_history (student_id, action, username, snapshot) VALUES (?, ?, ?, ?)",
-        (student["student_id"], action, username[:60], json.dumps(snapshot, ensure_ascii=False)),
+        "INSERT INTO student_history (student_pk, student_id, action, username, snapshot) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (student["id"], student["student_id"], action, username[:60],
+         json.dumps(snapshot, ensure_ascii=False)),
     )
 
 
@@ -225,11 +227,11 @@ def delete_student(pk, username=""):
     return cur.rowcount > 0
 
 
-def student_history(student_id):
+def student_history(student_pk):
     rows = get_db().execute(
         "SELECT id, at, username, action, snapshot FROM student_history "
-        "WHERE student_id = ? ORDER BY id DESC LIMIT 100",
-        (student_id,),
+        "WHERE student_pk = ? ORDER BY id DESC LIMIT 100",
+        (student_pk,),
     ).fetchall()
     return [
         {**dict(row), "snapshot": json.loads(row["snapshot"])}
@@ -315,7 +317,7 @@ def restore_data(students, history):
         db.execute("DELETE FROM student_history")
         db.execute("DELETE FROM students")
         for student in students:
-            columns = [field for field in FIELDS if field in student]
+            columns = ["id"] + [field for field in FIELDS if field in student]
             columns.extend(("created_at", "updated_at"))
             db.execute(
                 f"INSERT INTO students ({', '.join(columns)}) "
@@ -324,9 +326,9 @@ def restore_data(students, history):
             )
         for row in history:
             db.execute(
-                "INSERT INTO student_history (student_id, action, username, at, snapshot) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (row["student_id"], row["action"], row["username"], row["at"],
+                "INSERT INTO student_history (id, student_pk, student_id, action, username, at, snapshot) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (row["id"], row["student_pk"], row["student_id"], row["action"], row["username"], row["at"],
                  json.dumps(row["snapshot"], ensure_ascii=False)),
             )
         db.commit()

@@ -2,7 +2,6 @@
 
 import json
 import math
-import re
 from datetime import datetime
 from io import BytesIO
 
@@ -144,6 +143,8 @@ def restore_backup():
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         abort(400, description="Choose a backup JSON file.")
+    if not upload.filename.lower().endswith(".json"):
+        abort(400, description="Choose a file with the .json extension.")
     try:
         payload = json.loads(upload.read().decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -156,7 +157,7 @@ def restore_backup():
     if len(students) > BACKUP_LIMIT or len(history) > BACKUP_LIMIT * 20:
         abort(400, description=f"Backup exceeds the limit of {BACKUP_LIMIT} students.")
 
-    clean_students, emails, student_ids = [], set(), set()
+    clean_students, emails, student_ids, student_pks = [], set(), set(), set()
     for index, row in enumerate(students, 1):
         if not isinstance(row, dict):
             abort(400, description=f"Backup student {index} is invalid.")
@@ -166,29 +167,47 @@ def restore_backup():
         email, student_id = clean["email"].casefold(), clean["student_id"].casefold()
         if email in emails or student_id in student_ids:
             abort(400, description=f"Backup contains duplicate student data at row {index}.")
+        student_pk = row.get("id")
+        if not isinstance(student_pk, int) or isinstance(student_pk, bool) or student_pk < 1:
+            abort(400, description=f"Backup student {index} has an invalid record ID.")
+        if student_pk in student_pks:
+            abort(400, description=f"Backup contains duplicate record IDs at row {index}.")
         emails.add(email)
         student_ids.add(student_id)
+        student_pks.add(student_pk)
         created_at = row.get("created_at")
         updated_at = row.get("updated_at")
         if not _backup_timestamp(created_at) or not _backup_timestamp(updated_at):
             abort(400, description=f"Backup student {index} has an invalid timestamp.")
-        clean_students.append({**clean, "created_at": created_at, "updated_at": updated_at})
+        clean_students.append({"id": student_pk, **clean, "created_at": created_at, "updated_at": updated_at})
 
-    clean_history = []
+    clean_history, history_ids = [], set()
     for index, row in enumerate(history, 1):
-        if not isinstance(row, dict) or row.get("student_id", "").casefold() not in student_ids:
-            abort(400, description=f"Backup history item {index} references an unknown student.")
+        if not isinstance(row, dict):
+            abort(400, description=f"Backup history item {index} is invalid.")
+        history_student_id = row.get("student_id")
+        if not isinstance(history_student_id, str):
+            abort(400, description=f"Backup history item {index} has an invalid student ID.")
         if row.get("action") not in ("created", "updated", "deleted", "restored"):
             abort(400, description=f"Backup history item {index} has an invalid action.")
+        student_pk = row.get("student_pk")
+        if not isinstance(student_pk, int) or isinstance(student_pk, bool) or student_pk < 1:
+            abort(400, description=f"Backup history item {index} has an invalid record ID.")
+        history_pk = row.get("id")
+        if not isinstance(history_pk, int) or isinstance(history_pk, bool) or history_pk < 1 or history_pk in history_ids:
+            abort(400, description=f"Backup history item {index} has an invalid history ID.")
+        history_ids.add(history_pk)
         if not isinstance(row.get("username"), str) or len(row["username"]) > 60:
             abort(400, description=f"Backup history item {index} has an invalid username.")
         if not _backup_timestamp(row.get("at")) or not isinstance(row.get("snapshot"), dict):
             abort(400, description=f"Backup history item {index} is invalid.")
         snapshot, errors = validate_student(row["snapshot"], creating=True)
-        if errors or snapshot.get("student_id", "").casefold() != row["student_id"].casefold():
+        if errors or snapshot.get("student_id", "").casefold() != history_student_id.casefold():
             abort(400, description=f"Backup history item {index} contains invalid student data.")
         clean_history.append({
-            "student_id": row["student_id"],
+            "id": history_pk,
+            "student_pk": student_pk,
+            "student_id": history_student_id,
             "action": row["action"],
             "username": row["username"],
             "at": row["at"],

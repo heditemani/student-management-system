@@ -39,6 +39,7 @@
             {% if user.role == 'admin' %}
             <button type="button" class="menu-item" id="menu-users">Manage users</button>
             <button type="button" class="menu-item" id="menu-audit">Activity log</button>
+            <button type="button" class="menu-item" id="menu-backup">Backup &amp; restore</button>
             {% endif %}
             <button type="button" class="menu-item menu-danger" id="menu-logout">Sign out</button>
           </div>
@@ -63,6 +64,14 @@
         <button class="btn btn-outline-light" id="export-btn" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
           Export CSV
+        </button>
+        <button class="btn btn-outline-light" id="import-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/></svg>
+          Import CSV
+        </button>
+        <button class="btn btn-outline-light" id="report-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v6h6M10 13h6M10 17h6"/></svg>
+          PDF report
         </button>
         <button class="btn btn-light" id="add-btn" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -104,6 +113,16 @@
         <strong class="stat-value"><span id="stat-average">–</span><small> / 20</small></strong>
         <span class="stat-sub">across graded students</span>
       </article>
+    </section>
+
+    <section class="panel alerts-panel" id="alerts-panel" aria-labelledby="alerts-title" hidden>
+      <div class="panel-head">
+        <div class="panel-title">
+          <span class="panel-icon alert-panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg></span>
+          <div><h2 id="alerts-title">Needs attention</h2><p class="muted small">Grade alerts · below 10/20 or not entered</p></div>
+        </div>
+      </div>
+      <div class="alert-items" id="alert-items"></div>
     </section>
 
     <section class="panel" aria-labelledby="by-course-title">
@@ -159,8 +178,29 @@
             <option value="course">Course A to Z</option>
           </select>
         </div>
+        <div class="saved-filter-tools">
+          <label class="sr-only" for="saved-filters">Saved filters</label>
+          <select id="saved-filters"><option value="">Saved filters…</option></select>
+          <button class="btn btn-ghost" id="save-filter-btn" type="button">Save</button>
+          <button class="btn btn-ghost" id="delete-filter-btn" type="button" disabled aria-label="Delete selected saved filter">×</button>
+        </div>
         <button class="btn btn-ghost" id="clear-filters" type="button" hidden>Clear filters</button>
       </form>
+
+      <details class="advanced-filters">
+        <summary>Advanced filters</summary>
+        <div class="advanced-grid">
+          <div class="field"><label for="filter-average-min">Minimum average</label><input id="filter-average-min" type="number" min="0" max="20" step="0.1" placeholder="0–20"></div>
+          <div class="field"><label for="filter-average-max">Maximum average</label><input id="filter-average-max" type="number" min="0" max="20" step="0.1" placeholder="0–20"></div>
+          <div class="field"><label for="filter-year-min">Study year from</label><select id="filter-year-min"><option value="">Any year</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></div>
+          <div class="field"><label for="filter-year-max">Study year to</label><select id="filter-year-max"><option value="">Any year</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></div>
+          <div class="field"><label for="filter-academic-year">Academic year</label><input id="filter-academic-year" type="text" inputmode="numeric" placeholder="2026-2027" maxlength="9"></div>
+          <div class="field"><label for="filter-semester">Semester</label><select id="filter-semester"><option value="">Any semester</option><option value="1">Semester 1</option><option value="2">Semester 2</option></select></div>
+          <div class="field"><label for="filter-created-from">Added from</label><input id="filter-created-from" type="date"></div>
+          <div class="field"><label for="filter-created-to">Added to</label><input id="filter-created-to" type="date"></div>
+          <label class="check missing-grade-check"><input id="filter-missing-average" type="checkbox"><span>Only students without a grade</span></label>
+        </div>
+      </details>
 
       <div id="list-region" aria-busy="false">
         <div class="table-wrap" id="table-wrap">
@@ -270,6 +310,20 @@
             <p class="field-error" id="e-year"></p>
           </div>
           <div class="field">
+            <label for="f-academic_year">Academic year</label>
+            <input id="f-academic_year" name="academic_year" type="text" inputmode="numeric" maxlength="9" placeholder="2026-2027" aria-describedby="e-academic_year">
+            <p class="field-error" id="e-academic_year"></p>
+          </div>
+          <div class="field">
+            <label for="f-semester">Semester</label>
+            <select id="f-semester" name="semester" aria-describedby="e-semester">
+              <option value="">Not specified</option>
+              <option value="1">Semester 1</option>
+              <option value="2">Semester 2</option>
+            </select>
+            <p class="field-error" id="e-semester"></p>
+          </div>
+          <div class="field">
             <label for="f-average">Average (0 to 20)</label>
             <input id="f-average" name="average" type="number" min="0" max="20" step="0.01" inputmode="decimal" aria-describedby="e-average">
             <p class="field-error" id="e-average"></p>
@@ -319,12 +373,72 @@
       <footer class="dialog-foot dialog-foot-split">
         <button type="button" class="btn btn-danger-outline" id="details-delete">Delete</button>
         <div class="foot-actions">
+          <button type="button" class="btn btn-ghost" id="details-history">History</button>
           <button type="button" class="btn btn-ghost" data-close>Close</button>
           <button type="button" class="btn btn-primary" id="details-edit">Edit</button>
         </div>
       </footer>
     </div>
   </dialog>
+
+  <dialog id="history-dialog" class="dialog-wide" aria-labelledby="history-title">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <div><h2 id="history-title">Student history</h2><p class="muted small" id="history-student"></p></div>
+        <button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="dialog-body">
+        <p class="alert" id="history-alert" role="alert" hidden></p>
+        <ol class="history-list" id="history-list"></ol>
+        <p class="muted small" id="history-empty" hidden>No history recorded.</p>
+      </div>
+      <footer class="dialog-foot"><button type="button" class="btn btn-ghost" data-close>Close</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="import-dialog" class="dialog-wide" aria-labelledby="import-title">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <div><h2 id="import-title">Import students from CSV</h2><p class="muted small">Existing email or student ID duplicates are skipped.</p></div>
+        <button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="dialog-body">
+        <p class="hint">Required CSV headers: first_name, last_name, email, course. Exported CSV files are supported.</p>
+        <div class="field"><label for="import-file">CSV file</label><input id="import-file" type="file" accept=".csv,text/csv"></div>
+        <p class="alert" id="import-alert" role="alert" hidden></p>
+        <div class="import-summary" id="import-summary" aria-live="polite" hidden></div>
+        <ul class="import-sample" id="import-sample"></ul>
+        <ul class="import-errors" id="import-errors"></ul>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="button" class="btn btn-ghost" id="import-preview">Preview CSV</button>
+        <button type="button" class="btn btn-primary" id="import-submit" disabled>Import valid rows</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog id="preset-dialog" class="dialog-small" aria-labelledby="preset-title">
+    <form class="dialog-inner" id="preset-form">
+      <header class="dialog-head"><h2 id="preset-title">Save filter</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></header>
+      <div class="dialog-body"><div class="field"><label for="preset-name">Filter name</label><input id="preset-name" maxlength="40" required></div></div>
+      <footer class="dialog-foot"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Save filter</button></footer>
+    </form>
+  </dialog>
+
+  {% if user.role == 'admin' %}
+  <dialog id="backup-dialog" class="dialog-wide" aria-labelledby="backup-title">
+    <div class="dialog-inner">
+      <header class="dialog-head"><div><h2 id="backup-title">Backup &amp; restore</h2><p class="muted small">Backups contain student data and history, but not user accounts.</p></div><button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></header>
+      <div class="dialog-body">
+        <section class="backup-section"><h3>Download backup</h3><p class="muted small">Save a copy of all student records and their history.</p><button class="btn btn-primary" id="backup-download" type="button">Download backup</button></section>
+        <section class="backup-section"><h3>Restore backup</h3><p class="muted small">This replaces all student records and history. User accounts stay unchanged.</p><div class="field"><label for="backup-file">Backup JSON file</label><input id="backup-file" type="file" accept=".json,application/json"></div><button class="btn btn-danger" id="backup-restore" type="button">Restore data…</button></section>
+        <p class="alert" id="backup-alert" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-foot"><button type="button" class="btn btn-ghost" data-close>Close</button></footer>
+    </div>
+  </dialog>
+  {% endif %}
 
   <!-- Confirmation (delete student / user, disable user) -->
   <dialog id="confirm-dialog" class="dialog-small" aria-labelledby="confirm-title" aria-describedby="confirm-text">

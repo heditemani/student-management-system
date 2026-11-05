@@ -25,7 +25,12 @@ A full-stack web app to manage student records, with sign-in and roles. Flask + 
 - Validation on both client and server: required fields, email format, phone, date of birth, year 1 to 6, average 0 to 20.
 - Unique email (case-insensitive) and unique student ID. IDs are generated as `STU-<year>-NNNN` when left blank.
 - Search (name, email, ID, course), course and status filters, 9 sort orders, pagination.
+- Advanced filters for averages, study year, academic year/semester, and record dates; named filters are saved in the current browser.
 - Dashboard cards (total, active, graduated, suspended, average) and a "Students by course" chart.
+- In-app alerts for averages below 10/20 and students without an average.
+- Academic year and semester fields, plus a per-student history of changes.
+- CSV import with preview and duplicate skipping; printable, filter-aware reports that can be saved as PDF.
+- Admin-only JSON data backup and restore. User accounts are kept separate from student backups.
 - **Export to CSV** of the current filters. Spreadsheet formula injection is neutralised.
 
 **Accounts**
@@ -143,11 +148,16 @@ Usernames: 3 to 30 characters, letters, numbers, dot, dash, underscore (not case
 ## Using the app
 
 - **Add student**: button in the red banner. Required fields are marked with `*`. Leave *Student ID* empty to generate one.
+- **Study period**: optionally record the academic year (for example `2026-2027`) and semester for each student. Existing records remain unassigned until edited.
 - **View / edit / delete**: icons at the end of each row (staff do not see the delete icon).
-- **Search and filters**: type in the search box; use the course, status and sort menus. "Clear filters" resets everything.
+- **History**: open a student and choose *History* to see their recorded changes.
+- **Search and filters**: use the course/status/sort controls or expand *Advanced filters*. Save named filter presets in the current browser.
 - **Students by course**: select a bar to filter the list to that course; select it again to clear the course filter.
 - **Export CSV**: button in the banner. It exports the students matching the current search and filters (up to 10,000 rows) as a UTF-8 file that Excel opens correctly.
-- **User menu** (top right): change password, and for admins *Manage users* and *Activity log*. *Sign out* ends the session.
+- **Import CSV**: choose a UTF-8 CSV and preview it before importing. Required headers are `first_name`, `last_name`, `email`, and `course`; other recognized fields are optional. Invalid rows and existing email/ID duplicates are skipped and reported. Limit: 10,000 rows.
+- **Grade alerts**: dashboard shortcuts filter students with an average below 10/20 or no average.
+- **PDF report**: opens a printable report for the current filters. Choose *Print / Save as PDF* and select *Save as PDF* in the browser's print dialog.
+- **User menu** (top right): change password; admins also manage users, inspect the activity log, and open *Backup & restore*. Restoring replaces student data/history but leaves user accounts unchanged.
 - **Theme**: sun/moon button in the top bar.
 
 ## Configuration
@@ -170,7 +180,7 @@ Linux / macOS: `PORT=8000 python run.py`. Windows PowerShell: `$env:PORT=8000; p
 ```bash
 python -m unittest discover -s tests -v
 ```
-61 tests: students CRUD, validation, duplicates, pagination, search/filter/sort, SQL-injection and wildcard handling, security headers, sign-in, lockout, CSRF, roles, user management, password change and session revocation, activity log, CSV export and formula neutralisation. They use a temporary database and never touch yours. Expect about 15 seconds (password hashing is deliberately slow).
+Tests cover student CRUD, migrations, history, validation, CSV import/export, backups, filters, reports, security headers, sign-in, CSRF, roles, and activity logging. They use temporary databases and never touch yours. Password-hashing tests take about 30 seconds.
 
 ## API reference
 
@@ -192,17 +202,22 @@ Errors: `401 {"detail": "Sign in required."}`, `403` (wrong role or CSRF), `429`
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/students` | any | List. Query: `page`, `page_size` (max 100, default 10), `search`, `course`, `status`, `ordering` |
-| GET | `/students/export.csv` | any | CSV of the same filters (`search`, `course`, `status`, `ordering`) |
+| GET | `/students/export.csv` | any | CSV of the same advanced filters as the student list |
+| POST | `/students/import/preview` | any | Multipart `file` CSV. Validates rows and reports duplicates without writing |
+| POST | `/students/import` | any | Multipart `file` CSV. Imports valid rows; duplicates and invalid rows are skipped and reported |
 | POST | `/students` | any | Create. `201` and a `Location` header |
 | GET | `/students/<id>` | any | One student |
+| GET | `/students/<id>/history` | any | Up to 100 newest student change snapshots |
 | PUT | `/students/<id>` | any | Replace. Omitted optional fields reset to defaults; `student_id` is kept |
 | PATCH | `/students/<id>` | any | Change only the fields sent |
 | DELETE | `/students/<id>` | **admin** | `204` |
 | GET | `/stats` | any | Totals, overall average, `by_course` |
+| GET | `/alerts` | any | Counts of averages below 10/20 and missing averages |
 | GET | `/courses` | any | Distinct course names |
 
 `ordering`: `name`, `-name`, `student_id`, `-student_id`, `course`, `-course`, `year`, `-year`, `average`, `-average`, `created`, `-created` (default).
 `status`: `active`, `graduated`, `suspended`.
+Advanced filters: `average_min`, `average_max`, `year_min`, `year_max`, `academic_year`, `semester`, `missing_average`, `created_from`, `created_to`.
 
 ### Administration (admin only)
 
@@ -213,6 +228,8 @@ Errors: `401 {"detail": "Sign in required."}`, `403` (wrong role or CSRF), `429`
 | PATCH | `/users/<id>` | Any of `role`, `active` (true/false), `password` (reset). You cannot change your own role or disable yourself |
 | DELETE | `/users/<id>` | `204`. You cannot delete yourself |
 | GET | `/audit` | Activity log, newest first. Query: `page`, `page_size` (max 100, default 20) |
+| GET | `/backup` | Download student data/history JSON backup; user accounts are excluded |
+| POST | `/backup/restore` | Multipart `file` backup JSON. Replaces student data/history only |
 
 ### Example with curl
 
@@ -274,7 +291,9 @@ The built-in server (`python run.py`) is for development. For real use:
 
 ## Backups
 
-Everything lives in one file: `instance/students.db` (or `DATABASE_PATH`). Stop the server and copy the file, or, while running:
+Admins can download a JSON backup from **User menu → Backup & restore** while the app is running. It includes student data and history, but excludes user accounts. Restoring replaces all student data/history after confirmation; create a backup first. Keep backup files private because they contain personal information.
+
+For a complete database copy, everything lives in one file: `instance/students.db` (or `DATABASE_PATH`). Stop the server and copy the file, or, while running:
 ```bash
 sqlite3 instance/students.db ".backup backup.db"
 ```
@@ -308,6 +327,7 @@ Keep `instance/secret_key` private; losing it only signs everyone out.
 
 - **SQLite only.** Not tested with MySQL or PostgreSQL. Moving means replacing `sms/db.py` and the SQL in `sms/repository.py` and `sms/accounts.py` (or introducing SQLAlchemy and a driver).
 - Lockout counters are per process and lost on restart. There is no password-reset by email, no two-factor authentication, no self-service sign-up (admins create accounts).
-- No CSV import and no per-student history beyond the activity log.
+- Saved filter presets are local to the browser and are not shared across devices.
+- PDF creation uses the browser's print-to-PDF feature.
 - Demo data is fictitious. The average is on a 0 to 20 scale.
 - Browser testing was done in Chromium (Playwright) only. Firefox and Safari were not tested.

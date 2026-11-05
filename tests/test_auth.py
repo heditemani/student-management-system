@@ -273,7 +273,8 @@ class ExportTests(ApiTestCase):
         self.assertTrue(row[1].startswith("'="))
         self.assertTrue(row[2].startswith("'@"))
         self.assertEqual(row[4], "+216 20 111 222")
-        self.assertTrue(row[11].startswith("'-"))
+        address_index = self.rows()[0].index("address")
+        self.assertTrue(row[address_index].startswith("'-"))
 
     def test_bad_filter_is_rejected(self):
         self.assertEqual(self.client.get("/api/students/export.csv?status=nope").status_code, 400)

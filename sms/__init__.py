@@ -2,7 +2,7 @@
 
 import os
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session
 from werkzeug.exceptions import HTTPException
@@ -73,11 +73,15 @@ def create_app(test_config=None):
         user = current_user()
         if user is None:
             return redirect("/")
-        filters = api_module._filters({})
+        errors = {}
+        filters = api_module._filters(errors)
+        if errors:
+            abort(400, description="Invalid report filters: " + " ".join(errors.values()))
         rows, total = api_module.repo.list_students(page=1, page_size=10_000, **filters)
         if total > 10_000:
             abort(400, description="Reports are limited to 10,000 matching students. Add filters and try again.")
-        return render_template("report.html", students=rows, total=total, filters=filters)
+        return render_template("report.html", students=rows, total=total, filters=filters,
+                               generated_at=datetime.now().astimezone())
 
     @app.errorhandler(HTTPException)
     def http_error(error):
@@ -91,7 +95,7 @@ def create_app(test_config=None):
         response.headers["Content-Security-Policy"] = CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
-        if request.path.startswith("/api/") or request.path == "/":
+        if request.path.startswith("/api/") or request.path == "/" or request.path.startswith("/reports/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 

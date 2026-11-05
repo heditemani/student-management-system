@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Student report</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="{{ url_for('static', filename='js/report.js') }}" defer></script>
+</head>
+<body class="report-body">
+  <main class="report-shell">
+    <header class="report-head">
+      <div>
+        <p class="eyebrow report-eyebrow">STUDENT MANAGEMENT</p>
+        <h1>Student report</h1>
+        <p class="muted">Generated {{ generated_at.strftime('%Y-%m-%d %H:%M %Z') }} · {{ total }} students</p>
+      </div>
+      <button class="btn btn-primary no-print" id="print-report" type="button">Print / Save as PDF</button>
+    </header>
+    <section class="report-summary">
+      {% if filters.course %}<span>Course: {{ filters.course }}</span>{% endif %}
+      {% if filters.status %}<span>Status: {{ filters.status }}</span>{% endif %}
+      {% if filters.academic_year %}<span>Academic year: {{ filters.academic_year }}</span>{% endif %}
+      {% if filters.semester %}<span>Semester {{ filters.semester }}</span>{% endif %}
+      {% if filters.average_min is defined %}<span>Average from {{ filters.average_min }}</span>{% endif %}
+      {% if filters.average_max is defined %}<span>Average to {{ filters.average_max }}</span>{% endif %}
+      {% if filters.year_min is defined %}<span>Study year from {{ filters.year_min }}</span>{% endif %}
+      {% if filters.year_max is defined %}<span>Study year to {{ filters.year_max }}</span>{% endif %}
+      {% if filters.created_from %}<span>Added from {{ filters.created_from }}</span>{% endif %}
+      {% if filters.created_to %}<span>Added to {{ filters.created_to }}</span>{% endif %}
+      {% if filters.missing_average %}<span>Missing average only</span>{% endif %}
+      {% if filters.search %}<span>Search: {{ filters.search }}</span>{% endif %}
+    </section>
+    <div class="table-wrap">
+      <table class="table report-table">
+        <thead>
+          <tr><th>Student</th><th>ID</th><th>Course</th><th>Study period</th><th>Average / 20</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for student in students %}
+          <tr>
+            <td>{{ student.full_name }}<br><span class="muted small">{{ student.email }}</span></td>
+            <td class="mono">{{ student.student_id }}</td>
+            <td>{{ student.course }} · Year {{ student.year }}</td>
+            <td>{{ student.academic_year or '—' }}{% if student.semester %} · S{{ student.semester }}{% endif %}</td>
+            <td>{{ '%.2f'|format(student.average) if student.average is not none else '—' }}</td>
+            <td>{{ student.status|capitalize }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No students match these report filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <footer class="report-foot muted small">Confidential · Student Management System</footer>
+  </main>
+</body>
+</html>

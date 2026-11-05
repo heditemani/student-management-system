@@ -31,6 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_students_status ON students (status);
 
 CREATE TABLE IF NOT EXISTS student_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_pk INTEGER NOT NULL,
     student_id TEXT    NOT NULL,
     action     TEXT    NOT NULL CHECK (action IN ('created', 'updated', 'deleted', 'restored')),
     username   TEXT    NOT NULL DEFAULT '',
@@ -87,6 +88,13 @@ def init_db():
         conn.execute("ALTER TABLE students ADD COLUMN academic_year TEXT NOT NULL DEFAULT ''")
     if "semester" not in columns:
         conn.execute("ALTER TABLE students ADD COLUMN semester INTEGER")
+    history_columns = {row["name"] for row in conn.execute("PRAGMA table_info(student_history)")}
+    if "student_pk" not in history_columns:
+        conn.execute("ALTER TABLE student_history ADD COLUMN student_pk INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "UPDATE student_history SET student_pk = COALESCE("
+            "(SELECT id FROM students WHERE students.student_id = student_history.student_id), 0)"
+        )
     conn.commit()
 
 
