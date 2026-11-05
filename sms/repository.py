@@ -298,6 +298,43 @@ def import_students(records, username=""):
     return {"created": len(inserted), "duplicates": duplicates}
 
 
+def backup_data():
+    db = get_db()
+    students = [dict(row) for row in db.execute("SELECT * FROM students ORDER BY id")]
+    history = [
+        {**dict(row), "snapshot": json.loads(row["snapshot"])}
+        for row in db.execute("SELECT * FROM student_history ORDER BY id")
+    ]
+    return {"version": 1, "students": students, "history": history}
+
+
+def restore_data(students, history):
+    db = get_db()
+    try:
+        db.execute("BEGIN")
+        db.execute("DELETE FROM student_history")
+        db.execute("DELETE FROM students")
+        for student in students:
+            columns = [field for field in FIELDS if field in student]
+            columns.extend(("created_at", "updated_at"))
+            db.execute(
+                f"INSERT INTO students ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                [student[field] for field in columns],
+            )
+        for row in history:
+            db.execute(
+                "INSERT INTO student_history (student_id, action, username, at, snapshot) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (row["student_id"], row["action"], row["username"], row["at"],
+                 json.dumps(row["snapshot"], ensure_ascii=False)),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
 def stats():
     row = get_db().execute(
         "SELECT COUNT(*) AS total, "

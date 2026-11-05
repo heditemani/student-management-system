@@ -1,13 +1,20 @@
 """Administrator-only endpoints: user accounts and the activity log."""
 
+import json
 import math
+import re
+from datetime import datetime
+from io import BytesIO
 
-from flask import Blueprint, abort, g, jsonify, request
+from flask import Blueprint, abort, g, jsonify, request, send_file
 
 from . import accounts
 from .auth import admin_required
+from . import repository as repo
+from .validation import validate_student
 
 admin = Blueprint("admin", __name__, url_prefix="/api")
+BACKUP_LIMIT = 50_000
 
 
 def _body():
@@ -106,3 +113,88 @@ def audit_log():
     rows, total = accounts.list_audit(page, size)
     return jsonify(count=total, page=page, page_size=size,
                    pages=max(1, math.ceil(total / size)), results=rows)
+
+
+@admin.get("/backup")
+@admin_required
+def download_backup():
+    payload = json.dumps(repo.backup_data(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    accounts.audit("backup.export", f"{len(payload)} bytes")
+    return send_file(
+        BytesIO(payload),
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=f"student-management-backup-{datetime.now().date().isoformat()}.json",
+    )
+
+
+def _backup_timestamp(value):
+    if not isinstance(value, str) or len(value) > 40:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+@admin.post("/backup/restore")
+@admin_required
+def restore_backup():
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        abort(400, description="Choose a backup JSON file.")
+    try:
+        payload = json.loads(upload.read().decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        abort(400, description="Backup must be a valid UTF-8 JSON file.")
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        abort(400, description="Unsupported backup format.")
+    students, history = payload.get("students"), payload.get("history")
+    if not isinstance(students, list) or not isinstance(history, list):
+        abort(400, description="Backup must contain students and history lists.")
+    if len(students) > BACKUP_LIMIT or len(history) > BACKUP_LIMIT * 20:
+        abort(400, description=f"Backup exceeds the limit of {BACKUP_LIMIT} students.")
+
+    clean_students, emails, student_ids = [], set(), set()
+    for index, row in enumerate(students, 1):
+        if not isinstance(row, dict):
+            abort(400, description=f"Backup student {index} is invalid.")
+        clean, errors = validate_student(row, creating=True)
+        if errors or not clean.get("student_id"):
+            abort(400, description=f"Backup student {index} contains invalid student data.")
+        email, student_id = clean["email"].casefold(), clean["student_id"].casefold()
+        if email in emails or student_id in student_ids:
+            abort(400, description=f"Backup contains duplicate student data at row {index}.")
+        emails.add(email)
+        student_ids.add(student_id)
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        if not _backup_timestamp(created_at) or not _backup_timestamp(updated_at):
+            abort(400, description=f"Backup student {index} has an invalid timestamp.")
+        clean_students.append({**clean, "created_at": created_at, "updated_at": updated_at})
+
+    clean_history = []
+    for index, row in enumerate(history, 1):
+        if not isinstance(row, dict) or row.get("student_id", "").casefold() not in student_ids:
+            abort(400, description=f"Backup history item {index} references an unknown student.")
+        if row.get("action") not in ("created", "updated", "deleted", "restored"):
+            abort(400, description=f"Backup history item {index} has an invalid action.")
+        if not isinstance(row.get("username"), str) or len(row["username"]) > 60:
+            abort(400, description=f"Backup history item {index} has an invalid username.")
+        if not _backup_timestamp(row.get("at")) or not isinstance(row.get("snapshot"), dict):
+            abort(400, description=f"Backup history item {index} is invalid.")
+        snapshot, errors = validate_student(row["snapshot"], creating=True)
+        if errors or snapshot.get("student_id", "").casefold() != row["student_id"].casefold():
+            abort(400, description=f"Backup history item {index} contains invalid student data.")
+        clean_history.append({
+            "student_id": row["student_id"],
+            "action": row["action"],
+            "username": row["username"],
+            "at": row["at"],
+            "snapshot": snapshot,
+        })
+
+    repo.restore_data(clean_students, clean_history)
+    accounts.audit("backup.restore", f"{len(clean_students)} students")
+    return jsonify(restored=len(clean_students), history=len(clean_history))

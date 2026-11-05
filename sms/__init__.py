@@ -4,11 +4,12 @@ import os
 import secrets
 from datetime import timedelta
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, abort, jsonify, redirect, render_template, request, session
 from werkzeug.exceptions import HTTPException
 
 from . import accounts, db
 from .admin import admin
+from . import api as api_module
 from .api import api
 from .auth import auth, current_user, enforce_auth
 
@@ -46,6 +47,7 @@ def create_app(test_config=None):
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "") == "1",
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+        MAX_CONTENT_LENGTH=10 * 1024 * 1024,
     )
     if test_config:
         app.config.update(test_config)
@@ -65,6 +67,17 @@ def create_app(test_config=None):
         if user is None:
             return render_template("login.html")
         return render_template("index.html", user=accounts.public(user), csrf=session["csrf"])
+
+    @app.get("/reports/print")
+    def print_report():
+        user = current_user()
+        if user is None:
+            return redirect("/")
+        filters = api_module._filters({})
+        rows, total = api_module.repo.list_students(page=1, page_size=10_000, **filters)
+        if total > 10_000:
+            abort(400, description="Reports are limited to 10,000 matching students. Add filters and try again.")
+        return render_template("report.html", students=rows, total=total, filters=filters)
 
     @app.errorhandler(HTTPException)
     def http_error(error):
